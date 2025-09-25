@@ -13,6 +13,8 @@ callcenter呼叫中心源代码开源社区是基于freeswitch软交换基础上
 
 备注：对freeswtich源码编译感兴趣的读者，可以参考本作者的博客链接如下：
 
+https://blog.csdn.net/weixin_38921966/article/details/151991332?spm=1001.2014.3001.5502
+
 # 技术咨询与支持
 
 ![二维码](https://github.com/proudwolf/wixin_erweima/blob/main/%E5%BE%AE%E4%BF%A1%E4%BA%8C%E7%BB%B4%E7%A0%81.png)
