@@ -1,0 +1,985 @@
+#include "globaleaesserver.h"
+#include "dataproc.h"
+#include "ctictrl.h"
+#include "commonenginedll.h"
+#include "clientsock.h"
+
+extern void TraceEx( char *szMessage, ...);
+
+extern CClientSock m_clientSock;
+extern CCommonEngineDll m_CommonEngineDll;
+extern CCtiCtrl    m_CtiCtrl;
+
+CDataProc::CDataProc()
+{
+
+}
+
+CDataProc::~CDataProc()
+{
+
+}
+
+void CDataProc::data_proc_event(char *data)
+{
+    if( data == NULL )
+        return;
+
+//    TraceEx( data );
+
+    char szLog[1024*20] = {0};
+
+    string strData = "";
+    strData = data;
+    string strInfo[1024] = {""};
+    int iCount = DecodeFrame( strInfo, strData, "\n", 1 );
+
+    string strEventName = GetHeader( iCount, strInfo, "Event-Name: " );
+    memset( szLog, 0, 1024*20 );
+    sprintf( szLog, "recved, event_name = %s", (char *)strEventName.c_str() );
+    TraceEx( szLog );
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "CHANNEL_APPLICATION")
+    {
+        if( GetHeader( iCount, strInfo, "Event-Subclass: ") == "IVR_Ringing_Event" )
+        {
+            channel_ivr_ringing_event_proc( iCount, strInfo );
+            return;
+        }
+
+        if( GetHeader( iCount, strInfo, "Event-Subclass: ") == "Hangup_Event" )
+        {
+            channel_ivr_hangup_event_proc( iCount, strInfo );
+            return;
+        }
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "PLAYBACK_STOP")
+    {
+        channel_playback_stop_event_proc(iCount, strInfo);
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "DTMF")
+    {
+        channel_dtmf_event_proc(iCount, strInfo);
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "RECORD_STOP")
+    {
+        channel_record_stop_event_proc(iCount, strInfo);
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "CHANNEL_HANGUP")
+    {
+        channel_hangup_event_proc(iCount, strInfo);
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "CHANNEL_PARK")
+    {
+        channel_park_event_proc(iCount, strInfo);
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "CHANNEL_CREATE")
+    {
+        if( GetHeader( iCount, strInfo, "Answer-State: ") == "ringing")
+        {
+            channel_ext_ringing_event_proc(iCount, strInfo);
+        }
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "CHANNEL_ANSWER")
+    {
+        channel_answer_event_proc(iCount, strInfo);
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Subclass: " ) == "callcenter::info")
+    {
+        if( GetHeader( iCount, strInfo, "CC-Action: ") == "agent-offering")
+        {
+            return;
+        }
+
+        if( GetHeader( iCount, strInfo, "CC-Action: ") == "bridge-agent-start")
+        {
+            int iii = 0;
+            return;
+        }
+
+        if( GetHeader( iCount, strInfo, "CC-Action: ") == "bridge-agent-end")
+        {
+            int iii = 0;
+            return;
+        }
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "CHANNEL_HOLD")
+    {
+        channel_hold_event_proc(iCount, strInfo);
+        return;
+    }
+
+    if( GetHeader( iCount, strInfo, "Event-Name: " ) == "CHANNEL_UNHOLD")
+    {
+        channel_unhold_event_proc(iCount, strInfo);
+        return;
+    }
+}
+
+int  CDataProc::DecodeFrame(string *strInfo, string &strData, char *lpszSpliteValue, int iSpliteLen)
+{
+    int i = 0;
+    int pos = strData.find( lpszSpliteValue );
+    while( pos != string::npos )
+    {
+        int len = strData.length();
+        strInfo[i] = strData.substr( 0, pos );
+        strData = strData.substr( pos + iSpliteLen, len - ( strInfo[i].length() + iSpliteLen ) );
+        pos = strData.find( lpszSpliteValue );
+        i++;
+    }
+    strInfo[i] = strData;
+    return i + 1;
+}
+
+string CDataProc::GetHeader(int iCount, string *strInfo, string strValue)
+{
+    string strResult = "";
+    if( strInfo == NULL || iCount < 0 )
+        return strResult;
+
+    for(int i = 0; i < iCount; i++)
+    {
+        int nPos = strInfo[i].find( strValue );
+        if( nPos != string::npos )
+        {
+            char *lp = (char *)strInfo[i].c_str();
+
+            char szTemp[1024*2] = {0};
+            memcpy( szTemp, lp, strValue.length() );
+            if( strcmp( szTemp, (char *)strValue.c_str() ) == 0 )
+            {
+                lp += strValue.length();
+                strResult = lp;
+                break;
+            }
+        }
+    }
+
+    return strResult;
+}
+
+string CDataProc::GetChannelName(int iCount, string *strInfo, string strChannelName)
+{
+    string Channel_Name = GetHeader(iCount, strInfo, strChannelName ); //"Channel-Name: ");
+    if( Channel_Name.find( "sofia/internal/") != string::npos )
+    {
+        Channel_Name = Channel_Name.replace( 0, strlen( "sofia/internal/"), "");
+    }
+    else if( Channel_Name.find( "sofia/internal_loc/") != string::npos )
+    {
+        Channel_Name = Channel_Name.replace( 0, strlen( "sofia/internal_loc/"), "");
+    }
+    else if( Channel_Name.find( "sip:") != string::npos )
+    {
+        Channel_Name = Channel_Name.replace( 0, strlen( "sip:"), "");
+    }
+    else if( Channel_Name.find( "gw+") != string::npos )
+    {
+        Channel_Name = Channel_Name.replace( 0, strlen( "gw+"), "");
+    }
+
+    int nPos1 = Channel_Name.find( "%");
+    int nPos2 = Channel_Name.find( "@");
+    if( nPos1 != string::npos )
+    {
+        Channel_Name = Channel_Name.substr( 0, nPos1 );
+    }
+    else if( nPos2 != string::npos )
+    {
+        Channel_Name = Channel_Name.substr( 0, nPos2 );
+    }
+
+    return Channel_Name;
+}
+
+string CDataProc::GetDestNumber(int iCount, string *strInfo, string strDestParam, int iReplaceCount, string *strReplaceParam)
+{
+    string dest_numer = GetHeader(iCount, strInfo, strDestParam);
+    if( dest_numer.length() <= 0 )
+        return dest_numer;
+
+    for(int i = 0; i < iReplaceCount; i++)
+    {
+        if( dest_numer.find( strReplaceParam[i]) != string::npos )
+        {
+            dest_numer = dest_numer.replace( 0, strReplaceParam[i].length(), "" );
+        }
+    }
+
+    int nPos1 = dest_numer.find( "%");
+    int nPos2 = dest_numer.find( "@");
+    if( nPos1 != string::npos )
+    {
+        dest_numer = dest_numer.substr( 0, nPos1 );
+    }
+    else if( nPos2 != string::npos )
+    {
+        dest_numer = dest_numer.substr( 0, nPos2 );
+    }
+
+    return dest_numer;
+}
+
+void CDataProc::data_proc_from_cti(int iClientId, char *buf)
+{
+    try
+    {
+    if( iClientId < 0 || buf == NULL )
+        return;
+    PACKET_HEAD *pHead = (PACKET_HEAD *)buf;
+
+    string strInfo[16] = {""};
+    DecodeData( buf, strInfo );
+
+    char szLog[1024] = {0};
+    sprintf( szLog, "data_proc_from_cti, cmd = %d", pHead->cmd );
+    TraceEx( szLog );
+
+    switch(pHead->cmd)
+    {
+    case CMD_MONITOR:
+        m_CtiCtrl.cmd_monitor_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_PICKUP:
+        m_CtiCtrl.cmd_answer_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_HANGUP:
+        m_CtiCtrl.cmd_hangup_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_MAKECALL:
+        m_CtiCtrl.cmd_makecall_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_HOLDCALL:
+        m_CtiCtrl.cmd_hold_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_RETRIEVECALL:
+        m_CtiCtrl.cmd_retrieve_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_INITTRANS:
+        m_CtiCtrl.cmd_init_transfer_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_COMPLETETRANS:
+        m_CtiCtrl.cmd_complete_transfer_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_COMPLETECONF:
+        m_CtiCtrl.cmd_complete_conference_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_START_PLAY:
+        m_CtiCtrl.cmd_start_play_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_STOP_PLAY:
+        m_CtiCtrl.cmd_stop_play_proc( iClientId, buf, strInfo );
+        break;
+   case CMD_START_RECORD:
+        m_CtiCtrl.cmd_start_record_proc( iClientId, buf, strInfo );
+        break;
+    case CMD_STOP_RECORD:
+        m_CtiCtrl.cmd_stop_record_proc( iClientId, buf, strInfo );
+        break;
+    default:
+        break;
+    }
+    }
+    catch(...)
+    {
+        TraceEx( "error, exception, CData::data_proc() " );
+    }
+//	TraceEx( "pHead->cmd = %d, strInfo[0] = %s, strInfo[1] = %s, iClientId = %d",
+//		pHead->cmd, strInfo[0], strInfo[1],  iClientId );
+
+}
+
+void CDataProc::DecodeData(char *buf, string *strInfo)
+{
+    try
+    {
+    char buffer[1024*100] = {0};
+    PACKET_HEAD *pHead = (PACKET_HEAD *)buf;
+    memcpy( buffer, buf + sizeof(PACKET_HEAD), pHead->dwSize );
+
+    string strData = "";
+    strData = buffer;
+    DecodeFrame( strInfo, strData, "|", 1 );
+    }
+    catch(...)
+    {
+        TraceEx( "error, exception, CData::decode_data() " );
+    }
+}
+
+void CDataProc::OnClientClose(int iClientId)
+{
+    if( iClientId <= 0 )
+        return;
+}
+
+void CDataProc::InitParam()
+{
+    char szAESIni[64] = {0}, Writed[32] = {0};
+    strcpy( szAESIni, "AESServer.ini" );
+
+    QSettings *configIni = new QSettings(szAESIni, QSettings::IniFormat);
+
+    m_iLisenceNum = 4;
+    m_iCurrentNum = 0;
+
+    m_nMonitorNum = 0;
+#ifdef _VC6_
+    m_nMonitorNum = GetPrivateProfileInt("Monitor", "MoniNum", 16, lpFile);
+    sprintf(Writed,"%d",m_nMonitorNum);
+    WritePrivateProfileString("Monitor", "MoniNum",Writed, lpFile);
+#else
+    m_nMonitorNum = configIni->value("/Monitor/MoniNum").toInt();
+    m_nMonitorNum = (m_nMonitorNum>0)?m_nMonitorNum:16;
+    sprintf(Writed,"%d",m_nMonitorNum);
+    configIni->setValue("/Monitor/MoniNum", Writed);
+#endif
+
+    m_lpstrExtDN = NULL;
+    m_lpstrExtDN = new string[m_nMonitorNum];
+    if( m_lpstrExtDN == NULL )
+    {
+        TraceEx( "error, ext_dn malloc failed" );
+        return;
+    }
+
+    for (int j = 0 ;j<m_nMonitorNum;j++)
+    {
+        sprintf(Writed,"ExtNo%d",j);
+
+#ifdef _VC6_
+        GetPrivateProfileString("Monitor",Writed,"",szTmp,20,lpFile);
+        WritePrivateProfileString("Monitor", Writed,szTmp, lpFile);//
+#else
+        m_lpstrExtDN[j] = "";
+        char szSection[32] = {0};
+        sprintf( szSection, "/Monitor/%s", Writed );
+        QString strExtNo = configIni->value(szSection).toString();
+        m_lpstrExtDN[j] = (strExtNo.length()>0)?strExtNo.toStdString():"";
+        configIni->setValue(szSection, strExtNo);
+#endif
+    }
+
+    m_nIvrNum = configIni->value("/CTI/IVRNum").toInt();
+    m_nIvrNum = (m_nIvrNum>0)?m_nIvrNum:32;
+    sprintf(Writed,"%d",m_nIvrNum);
+    configIni->setValue("/CTI/IVRNum", Writed);
+
+    m_lpstrIVRDN = NULL;
+    m_lpstrIVRDN = new string[m_nIvrNum];
+    if( m_lpstrIVRDN == NULL )
+    {
+        TraceEx( "error, ivr_dn malloc memory failed!");
+        return;
+    }
+
+    m_pIVRInfo = NULL;
+    m_pIVRInfo = new IVR_INFO[m_nIvrNum];
+    if( m_pIVRInfo == NULL )
+    {
+        TraceEx( "error, ivr_info malloc memory failed!");
+        return;
+    }
+
+
+    int i = 0;
+    for (i=0; i<m_nIvrNum; i++)
+    {
+        sprintf(Writed,"Channel%d",i);
+#ifdef _VC6_
+        GetPrivateProfileString("CTI",Writed,"",m_szCtiDN[i].GetBuffer(20),20,lpFile);
+        WritePrivateProfileString("CTI", Writed,m_szCtiDN[i], lpFile);
+#else
+
+        m_lpstrIVRDN[i] = "";
+        char szSection[32] = {0};
+        sprintf( szSection, "/CTI/%s", Writed );
+        QString strCtiDN = configIni->value(szSection).toString();
+        m_lpstrIVRDN[i] = (strCtiDN.length()>0)?strCtiDN.toStdString():"";
+        configIni->setValue(szSection, strCtiDN);
+
+        memset( &m_pIVRInfo[i], 0, sizeof(IVR_INFO) );
+        m_pIVRInfo[i].iChannelId = i;
+        strcpy( m_pIVRInfo[i].szIVRExt, (char *)m_lpstrIVRDN[i].c_str() );
+#endif
+    }
+
+
+    char szbuffer[32] = {0};
+
+    m_iMoniIVRDNNum = configIni->value("/MoniIVRDN/IVRDNNum").toInt();
+    m_iMoniIVRDNNum = (m_iMoniIVRDNNum>0)?m_iMoniIVRDNNum:0;
+    sprintf(szbuffer,"%d",m_iMoniIVRDNNum);
+    configIni->setValue("/MoniIVRDN/IVRDNNum", szbuffer);
+
+    m_lpstrMoniIVRDN = NULL;
+    m_lpstrMoniIVRDN = new string[m_iMoniIVRDNNum];
+    if( m_lpstrMoniIVRDN == NULL )
+    {
+        TraceEx( "error, moni_ivr_dn malloc memory failed");
+        return;
+    }
+
+    for (i=0; i<m_iMoniIVRDNNum; i++)
+    {
+        sprintf(Writed,"IVRDN%d",i);
+        char szSection[32] = {0};
+        sprintf( szSection, "/MoniIVRDN/%s", Writed );
+        QString strMoniIVRDN = configIni->value(szSection).toString();
+        m_lpstrMoniIVRDN[i] = "";
+        m_lpstrMoniIVRDN[i] = (strMoniIVRDN.length()>0)?strMoniIVRDN.toStdString():"";
+        configIni->setValue(szSection, strMoniIVRDN);
+    }
+
+
+    delete configIni;
+
+
+}
+
+bool CDataProc::IsBeyondLisence()
+{
+    bool bResult = false;
+    if( m_iCurrentNum + 1 >= m_iLisenceNum )
+    {
+        bResult = true;
+        char szLog[128] = {0};
+        sprintf( szLog, "beyond lisence num, m_iCurrentNum = %d, m_iLisenceNum = %d", m_iCurrentNum, m_iLisenceNum );
+        TraceEx( szLog );
+    }
+
+    return bResult;
+}
+
+bool CDataProc::IsDNExist(char *szExt)
+{
+    bool  bResult = false;
+
+    if( szExt == NULL )
+        return bResult;
+
+    int i = 0;
+    for( i = 0; i < m_nMonitorNum; i++)
+    {
+        if( m_lpstrExtDN[i] == szExt )
+        {
+            bResult = true;
+            return bResult;
+        }
+    }
+
+    i = 0;
+    for( i = 0; i < m_nIvrNum; i++)
+    {
+        if( m_lpstrIVRDN[i] == szExt )
+        {
+            bResult = true;
+            return bResult;
+        }
+    }
+
+    i = 0;
+    for( i = 0; i < m_iMoniIVRDNNum; i++)
+    {
+        if( m_lpstrMoniIVRDN[i] == szExt )
+        {
+            bResult = true;
+            return bResult;
+        }
+    }
+
+    return bResult;
+}
+
+int CDataProc::GetClientIdByExt(int iClientType, char *ext, int *iClientArray)
+{
+    int iTotalNum = 0;
+
+    if( ext == NULL || iClientArray == NULL )
+        return iTotalNum;
+
+    int iSize = m_Device_Sock_List.size();
+    if( iSize == 0 )
+        return iTotalNum;
+
+    list<DEVICE_SOCK_INFO *>::iterator it;
+    for(it = m_Device_Sock_List.begin(); it != m_Device_Sock_List.end(); ++it)
+    {
+        DEVICE_SOCK_INFO *info = *it;
+        if( info != NULL )
+        {
+            if( strcmp( info->szDevice, ext ) == 0 && info->iClientType == iClientType )
+            {
+                iClientArray[iTotalNum] = info->iClientId;
+                iTotalNum++;
+            }
+        }
+    }
+
+    return iTotalNum;
+}
+
+void CDataProc::SendCallEventToClient(char *ext, int iClientType, int cmd,int cmdtype, char *lpszSendBuffer, int iDataLen)
+{
+    if( ext == NULL || iClientType < 0 || lpszSendBuffer == NULL || iDataLen <= 0 )
+        return;
+
+    char buffer[1024*16] = {0};
+
+    PACKET_HEAD Packet_Head;
+    memset( &Packet_Head, 0, sizeof( PACKET_HEAD ) );
+    Packet_Head.cmd = cmd;
+    Packet_Head.cmd_type = cmdtype;
+    Packet_Head.dwFlag = PACKET_FLAG;
+    Packet_Head.dwSize = iDataLen;
+
+    memcpy( buffer, &Packet_Head, sizeof( PACKET_HEAD ));
+
+    if( iDataLen != 0 )
+    {
+        memcpy( buffer + sizeof( PACKET_HEAD ), lpszSendBuffer, iDataLen );
+    }
+
+    int iClientId[64] = {0};
+    int iClientNum = GetClientIdByExt( iClientType, ext, iClientId );
+    if( iClientNum > 0 )
+    {
+        for(int i = 0; i < iClientNum; i++)
+        {
+            m_CommonEngineDll.SendToClientFunc( iClientId[i], buffer, sizeof(PACKET_HEAD) + iDataLen );
+        }
+    }
+    else
+    {
+        char szLog[256] = {0};
+        sprintf( szLog, "error, can not find client, ext = %s", ext );
+        TraceEx( szLog );
+    }
+}
+
+void CDataProc::RecordCallInfoByCallID(char *szDeviceId, char *lpszUUID )
+{
+    if( szDeviceId == NULL || lpszUUID == NULL )
+        return;
+
+    char szLog[512] = {0};
+
+    if( !IsDNExist(szDeviceId))
+    {
+        sprintf( szLog, "warnning, ext dose not exist, device = %s", szDeviceId );
+        TraceEx( szLog );
+        return;
+    }
+
+    sprintf( szLog, "record_call_info, device = %s, uuid = %s", szDeviceId, lpszUUID );
+    TraceEx( szLog );
+
+    //CALL_INFO
+    CALL_INFO *pCallInfo = m_DNCallInfoMap.Find( szDeviceId );
+    if( pCallInfo == NULL )
+    {
+        pCallInfo = new CALL_INFO;
+        if( pCallInfo != NULL )
+        {
+            memset( pCallInfo, 0, sizeof(CALL_INFO) );
+            strcpy( pCallInfo->szDeviceId, szDeviceId );
+            strcpy( pCallInfo->szActiveCallID, lpszUUID );
+
+            m_DNCallInfoMap.Add( szDeviceId, pCallInfo );
+        }
+        else
+        {
+            TraceEx( "error, call_info malloc memory failed!" );
+            return;
+        }
+    }
+    else
+    {
+        if( pCallInfo->iStartTransferFlag == 1 )
+        {
+            memset( pCallInfo->szHeldCallID, 0, 64 );
+            strcpy( pCallInfo->szHeldCallID, pCallInfo->szActiveCallID );
+        }
+
+        memset( pCallInfo->szActiveCallID, 0, 64 );
+        strcpy( pCallInfo->szActiveCallID, lpszUUID );
+    }
+
+    memset( szLog, 0, 512 );
+    sprintf( szLog, "notify, end_record_call_info, device = %s, heldCallId = %s, activeCallId = %s",
+             szDeviceId, pCallInfo->szHeldCallID, pCallInfo->szActiveCallID );
+    TraceEx( szLog );
+}
+
+CALL_INFO *CDataProc::FindCallInfoByDeviceId(char *szDeviceId)
+{
+    CALL_INFO *pCallInfo = NULL;
+    if( szDeviceId == NULL )
+        return pCallInfo;
+
+    return m_DNCallInfoMap.Find( szDeviceId );
+}
+
+void CDataProc::channel_hangup_event_proc(int iCount, string *strInfo)
+{
+    string Channel_Name = GetChannelName(iCount, strInfo, "Channel-Name: ");
+
+    string uuid = GetHeader( iCount, strInfo, "Unique-ID: ");
+
+    //string DIALSTATUS = GetHeader(iCount, strInfo, "variable_DIALSTATUS: ");
+
+    string strHangupCause = GetHeader(iCount, strInfo, "Hangup-Cause: " );
+
+    char szLog[1024] = {0};
+    sprintf( szLog, "-------hangup_event----- has occurred, uuid = %s, Channel_Name = %s, Hangup_Cause = %s",
+             (char *)uuid.c_str(), (char *)Channel_Name.c_str(), (char *)strHangupCause.c_str() );
+    TraceEx( szLog );
+
+    char lpszSendBuffer[1024*2] = {0};
+    sprintf( lpszSendBuffer, "%s|%s", (char *)Channel_Name.c_str(), (char *)uuid.c_str() );
+
+    SendCallEventToClient( (char *)Channel_Name.c_str(), device_type, CMD_EXTHANGUP_EVENT, SNT_EVENT, lpszSendBuffer, strlen(lpszSendBuffer) );
+}
+
+void CDataProc::channel_park_event_proc(int iCount, string *strInfo)
+{
+    string uuid = GetHeader(iCount, strInfo, "Unique-ID: " );
+    if( GetHeader( iCount, strInfo, "Call-Direction: ") == "inbound"
+            && GetHeader( iCount, strInfo, "Event-Calling-Function: ") == "switch_ivr_park" )
+    {
+        //IVR呼入
+        string strCmd = "bgapi uuid_broadcast " + uuid + " event::Event-Subclass=IVR_Ringing_Event,Caller=${caller_id_number},UUID=${uuid},VDN=${destination_number}" + "\n\n";
+        m_clientSock.SendToClient( (char *)strCmd.c_str(), strCmd.length() );
+        TraceEx( (char *)strCmd.c_str() );
+
+        strCmd = "";
+        strCmd = "bgapi uuid_broadcast " + uuid + " unset::park_from_ivr" + "\n\n";
+        m_clientSock.SendToClient( (char *)strCmd.c_str(), strCmd.length() );
+        TraceEx( (char *)strCmd.c_str() );
+    }
+    else if( GetHeader( iCount, strInfo, "variable_IVR_outbound: ").length() > 0 )
+    {
+        //IVR外呼
+        string IVR_DN = GetHeader(iCount, strInfo, "variable_IVR_DN: ");
+        string IVR_OutboundNumber = GetHeader(iCount, strInfo, "variable_IVR_OutboundNumber: ");
+
+        string strCmd = "";
+        strCmd = "bgapi uuid_broadcast " + uuid + " event::Event-Subclass=IVR_RingBack_Event,IVR_DN=" + IVR_DN+",UUID=${uuid}"+",IVR_OutboundNumber=" + IVR_OutboundNumber + "\n\n";
+        m_clientSock.SendToClient( (char *)strCmd.c_str(), strCmd.length() );
+        TraceEx( (char *)strCmd.c_str() );
+
+    }
+}
+
+void CDataProc::channel_ext_ringing_event_proc(int iCount, string *strInfo)
+{
+    string CallerNumber = "", DestinationNumber = "", ani = "";
+    string Caller_Orig_Caller_ID_Number = "";
+    //string Other_Leg_Unique_ID = "";
+    //string Listen = "";
+    //string Intrude = "";
+    string Channel_Name = GetChannelName(iCount, strInfo, "Channel-Name: ");
+    string uuid = GetHeader(iCount, strInfo, "Unique-ID: " );
+
+    int iReplaceCount = 3;
+    string stringReplaceParam[3] = {"sip:", "gw+", "*926" };
+    CallerNumber = GetDestNumber( iCount, strInfo, "Caller-Caller-ID-Number: ", iReplaceCount, stringReplaceParam );
+    DestinationNumber = GetDestNumber( iCount, strInfo, "Caller-Destination-Number: ", iReplaceCount, stringReplaceParam );
+    Caller_Orig_Caller_ID_Number = GetDestNumber( iCount, strInfo, "Caller-Orig-Caller-ID-Number: ", iReplaceCount, stringReplaceParam );
+
+    char szLog[1024] = {0};
+    sprintf( szLog, "------ringing_event------- hase occurred, Channel_Name = %s, caller_numer = %s, dest_number = %s, orig_caller_numer = %s, uuid = %s",
+             (char *)Channel_Name.c_str(), (char *)CallerNumber.c_str(), (char *)DestinationNumber.c_str(), (char *)Caller_Orig_Caller_ID_Number.c_str(),
+             (char *)uuid.c_str() );
+    TraceEx( szLog );
+
+    RecordCallInfoByCallID( (char *)Channel_Name.c_str(), (char *)uuid.c_str() );
+
+    char lpszSendBuffer[1024*2] = {0};
+
+    int iCmd = 0;
+    if( Channel_Name == DestinationNumber )
+    {
+        iCmd = CMD_CALLERIDCOMING_EVENT;
+    }
+    else
+    {
+        iCmd = CMD_EXTENSIONRINGBACK_EVENT;
+    }
+    sprintf( lpszSendBuffer, "%d|%s|%s|%s|%s|%s", iCmd, (char *)Channel_Name.c_str(), (char *)CallerNumber.c_str(),
+             (char *)DestinationNumber.c_str(), (char *)uuid.c_str(), "" );
+
+    SendCallEventToClient( (char *)Channel_Name.c_str(), device_type, iCmd, SNT_EVENT, lpszSendBuffer, strlen(lpszSendBuffer) );
+}
+
+void CDataProc::channel_answer_event_proc(int iCount, string *strInfo)
+{
+    string CallerNumber = "", DestinationNumber = "", ani = "";
+    string Caller_Orig_Caller_ID_Number = "";
+    string UUID = GetHeader(iCount, strInfo, "Unique-ID: " );
+    string Channel_Name = GetChannelName(iCount, strInfo, "Channel-Name: ");
+
+    int iReplaceCount = 3;
+    string stringReplaceParam[3] = {"sip:", "gw+", "*926" };
+    CallerNumber = GetDestNumber( iCount, strInfo, "Caller-Caller-ID-Number: ", iReplaceCount, stringReplaceParam );
+    DestinationNumber = GetDestNumber( iCount, strInfo, "Caller-Destination-Number: ", iReplaceCount, stringReplaceParam );
+    Caller_Orig_Caller_ID_Number = GetDestNumber( iCount, strInfo, "Caller-Orig-Caller-ID-Number: ", iReplaceCount, stringReplaceParam );
+
+    char szLog[1024] = {0};
+    sprintf( szLog, "------answer_event------- hase occurred, Channel_Name = %s, caller_numer = %s, dest_number = %s, orig_caller_numer = %s, UUID = %s       ",
+             (char *)Channel_Name.c_str(), (char *)CallerNumber.c_str(), (char *)DestinationNumber.c_str(), (char *)Caller_Orig_Caller_ID_Number.c_str(),
+             (char *)UUID.c_str() );
+    TraceEx( szLog );
+
+    //callingDevice|answeringDevice|calledDevice|lCallID|iIO
+    char lpszSendBuffer[1024*2] = {0};
+
+    int iIO = 0;
+    if( Channel_Name == CallerNumber )
+        iIO = 1;
+
+    if( iIO == 0 && DestinationNumber.length() == 0 )
+        DestinationNumber = Channel_Name;
+
+    sprintf( lpszSendBuffer, "%s|%s|%s|%s|%d", (char *)CallerNumber.c_str(), (char *)DestinationNumber.c_str(),
+             (char *)DestinationNumber.c_str(), (char *)UUID.c_str(), iIO );
+
+    TraceEx( lpszSendBuffer );
+
+    SendCallEventToClient( (char *)Channel_Name.c_str(), device_type, CMD_CALLESTABLISHED_EVENT, SNT_EVENT, lpszSendBuffer, strlen(lpszSendBuffer) );
+
+}
+
+void CDataProc::channel_hold_event_proc(int iCount, string *strInfo)
+{
+    string Channel_Name = GetChannelName(iCount, strInfo, "Channel-Name: ");
+    string Callee = GetHeader(iCount, strInfo, "Caller-Destination-Number: ");
+    string UUID = GetHeader(iCount, strInfo, "Unique-ID: " );
+
+    string OtherLegUUID = GetHeader(iCount, strInfo, "Other-Leg-Unique-ID: ");
+
+    char szLog[1024] = {0};
+    sprintf( szLog, "------hold_event------- hase occurred, Channel_Name = %s, Callee = %s, UUID = %s, OtherLegUUID = %s",
+             (char *)Channel_Name.c_str(), (char *)Callee.c_str(), (char *)UUID.c_str(), (char *)OtherLegUUID.c_str() );
+    TraceEx( szLog );
+
+    //activeDevice|heldDevice|lCallID
+    char lpszSendBuffer[1024*2] = {0};
+    sprintf( lpszSendBuffer, "%s|%s|%s", (char *)Channel_Name.c_str(), (char *)Callee.c_str(), (char *)UUID.c_str());
+
+    SendCallEventToClient( (char *)Channel_Name.c_str(), device_type, CMD_EXTONHOLD_EVENT, SNT_EVENT, lpszSendBuffer, strlen(lpszSendBuffer) );
+}
+
+void CDataProc::channel_unhold_event_proc(int iCount, string *strInfo)
+{
+    string Channel_Name = GetChannelName(iCount, strInfo, "Channel-Name: ");
+    string Callee = GetHeader(iCount, strInfo, "Caller-Destination-Number: ");
+    string UUID = GetHeader(iCount, strInfo, "Unique-ID: " );
+
+    string OtherLegUUID = GetHeader(iCount, strInfo, "Other-Leg-Unique-ID: ");
+
+    char szLog[1024] = {0};
+    sprintf( szLog, "------unhold_event------- hase occurred, Channel_Name = %s, Callee = %s, UUID = %s, OtherLegUUID = %s",
+             (char *)Channel_Name.c_str(), (char *)Callee.c_str(), (char *)UUID.c_str(), (char *)OtherLegUUID.c_str() );
+    TraceEx( szLog );
+
+    //activeDevice|lCallID
+    char lpszSendBuffer[1024*2] = {0};
+    sprintf( lpszSendBuffer, "%s|%s", (char *)Channel_Name.c_str(), (char *)UUID.c_str());
+
+    SendCallEventToClient( (char *)Channel_Name.c_str(), device_type, CMD_EXTONRETRIEVE_EVENT, SNT_EVENT, lpszSendBuffer, strlen(lpszSendBuffer) );
+}
+
+void CDataProc::channel_ivr_ringing_event_proc(int iCount, string *strInfo)
+{
+    string strCaller = GetChannelName(iCount, strInfo, "Caller: ");
+    string UUID = GetHeader(iCount, strInfo, "UUID: " );
+
+    //Callee为转入IVR流程的VDN而不是IVR_Channel
+//    string strCalleeId = GetHeader(iCount, strInfo, "VDN: " );
+
+    char szIVRDevice[64] = {0};
+    if( is_ivr_running( (char *)UUID.c_str(), szIVRDevice ) )
+    {
+        char szLog[512] = {0};
+        sprintf( szLog, "notify, ivr_channel is running now, ivr_device = %s, uuid = %s",
+                 szIVRDevice, (char *)UUID.c_str() );
+        TraceEx( szLog );
+        return;
+    }
+
+    IVR_INFO *pIVRInfo = get_idle_ivr_channel();
+    if( pIVRInfo != NULL )
+    {
+        pIVRInfo->iRunningFlag = 1;
+        memset( pIVRInfo->szCaller, 0, 64 );
+        memset( pIVRInfo->szUUID, 0, 64 );
+
+        strcpy( pIVRInfo->szCaller, (char *)strCaller.c_str() );
+        strcpy( pIVRInfo->szUUID, (char *)UUID.c_str() );
+
+        //send ivr ringing event now...
+        char lpszSendBuffer[1024*2] = {0};
+
+        int iCmd = CMD_CALLERIDCOMING_EVENT;
+
+        sprintf( lpszSendBuffer, "%d|%s|%s|%s|%s|%s", iCmd, pIVRInfo->szIVRExt, pIVRInfo->szCaller,
+                 pIVRInfo->szIVRExt, pIVRInfo->szUUID, "" );
+
+        SendCallEventToClient( pIVRInfo->szIVRExt, device_type, iCmd, SNT_EVENT, lpszSendBuffer, strlen(lpszSendBuffer) );
+
+    }
+    else
+    {
+        TraceEx( "error, can not find idle ive channel now...");
+    }
+}
+
+IVR_INFO *CDataProc::get_idle_ivr_channel()
+{
+    IVR_INFO *pIVRInfo = NULL;
+
+    for(int i = 0; i < m_nIvrNum; i++)
+    {
+        if( m_pIVRInfo[i].iRunningFlag == 0 )
+        {
+            pIVRInfo = &m_pIVRInfo[i];
+            break;
+        }
+    }
+
+    return pIVRInfo;
+}
+
+IVR_INFO *CDataProc::get_ivr_info_by_uuid(char *lpszUUID)
+{
+    IVR_INFO *pIVRInfo = NULL;
+    if( lpszUUID == NULL )
+        return pIVRInfo;
+
+    for(int i = 0; i < m_nIvrNum; i++)
+    {
+        if( m_pIVRInfo[i].iRunningFlag == 1 && strcmp( m_pIVRInfo[i].szUUID, lpszUUID) == 0 )
+        {
+            pIVRInfo = &m_pIVRInfo[i];
+            break;
+        }
+    }
+
+    return pIVRInfo;
+}
+
+bool CDataProc::is_ivr_running(char *lpszUUID, char *ivr_device)
+{
+    bool bResult = false;
+    if( lpszUUID == NULL || ivr_device == NULL )
+        return bResult;
+
+    for(int i = 0; i < m_nIvrNum; i++)
+    {
+        if( m_pIVRInfo[i].iRunningFlag == 1 && strcmp( m_pIVRInfo[i].szUUID, lpszUUID) == 0 )
+        {
+            strcpy( ivr_device, m_pIVRInfo[i].szIVRExt );
+            bResult = true;
+            break;
+        }
+    }
+
+    return bResult;
+}
+
+void CDataProc::channel_ivr_hangup_event_proc(int iCount, string *strInfo)
+{
+    string UUID = GetHeader(iCount, strInfo, "UUID: " );
+    IVR_INFO *pIVRInfo = get_ivr_info_by_uuid( (char *)UUID.c_str());
+    if( pIVRInfo != NULL )
+    {
+        pIVRInfo->iRunningFlag = 0;
+        memset( pIVRInfo->szCaller, 0, 64 );
+        memset( pIVRInfo->szUUID, 0, 64 );
+
+        char lpszSendBuffer[1024*2] = {0};
+        sprintf( lpszSendBuffer, "%s|%s", pIVRInfo->szIVRExt, (char *)UUID.c_str() );
+
+        SendCallEventToClient( pIVRInfo->szIVRExt, device_type, CMD_EXTHANGUP_EVENT, SNT_EVENT, lpszSendBuffer, strlen(lpszSendBuffer) );
+    }
+}
+
+void CDataProc::channel_dtmf_event_proc(int iCount, string *strInfo)
+{
+    string uuid = GetHeader(iCount, strInfo, "Unique-ID: ");
+    string DTMF_Digit = GetHeader(iCount, strInfo, "DTMF-Digit: ");
+    string DTMF_Source= GetHeader(iCount, strInfo, "DTMF-Source: ");
+    if (DTMF_Source != "APP")
+    {
+        IVR_INFO *pIVRInfo = get_ivr_info_by_uuid( (char *)uuid.c_str());
+        if (pIVRInfo != NULL)
+        {
+            if(GetHeader(iCount, strInfo, "DTMF-Source: ") == "RTP")
+            {
+                char buf[1024*2] = {0};
+                sprintf( buf, "%s|%d|%s", pIVRInfo->szIVRExt, pIVRInfo->iChannelId, (char *)DTMF_Digit.c_str() );
+
+                SendCallEventToClient( pIVRInfo->szIVRExt, multi_media_type, CMD_RECV_DTMF, SNT_EVENT, buf, strlen(buf) );
+            }
+        }
+        else
+        {
+            TraceEx( "error, dtmf_event, can not find ivr_info");
+        }
+
+    }
+}
+
+void CDataProc::channel_record_stop_event_proc(int iCount, string *strInfo)
+{
+
+}
+
+void CDataProc::channel_playback_stop_event_proc(int iCount, string *strInfo)
+{
+    //DN|Ch|reasonCode
+    //reasonCode的定义如下：
+    //1：正常结束放音。
+    //2：接收到DTMF打断放音
+
+    string uuid = GetHeader(iCount, strInfo, "Unique-ID: ");
+    string Playback_Status = GetHeader(iCount, strInfo, "Playback-Status: ");
+    string reasonCode = "";
+    if (Playback_Status == "done")
+    {
+        reasonCode = "1";
+    }
+    else
+    {
+        reasonCode = "2";
+    }
+}
+
+IVR_INFO *CDataProc::get_ivr_info_by_ch(int iCh)
+{
+    IVR_INFO *pIVRInfo = NULL;
+    if( iCh < 0 || iCh >= m_nIvrNum )
+        return pIVRInfo;
+
+    pIVRInfo = &m_pIVRInfo[iCh];
+    return pIVRInfo;
+}
