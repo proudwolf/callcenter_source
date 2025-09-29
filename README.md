@@ -1,6 +1,17 @@
-# AES配置使用说明
+# AES介绍
 
 AES 作用：用于提供连接freeswitch的接口，我们在此取名这个服务的名字叫AES
+
+## 1、AES_installer
+
+已经编译成功的AES安装包，直接下载后，按照后面的配置使用说明即可使用。
+
+## 2、AES_source_code
+
+AES的源代码：读者可以下载源代码自行编译或进行二次开发
+
+
+# AES配置使用说明
 
 ## 1、AES的安装
 
@@ -23,6 +34,7 @@ AES 作用：用于提供连接freeswitch的接口，我们在此取名这个服
 root同一级别的etc目录）
 
 （1）、执行命令：cd  /etc/ld.so.conf.d/
+
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/b1428e4228bd48aeb5709d17cd7e9c50.png)
 
 
@@ -31,6 +43,7 @@ root同一级别的etc目录）
 输入命令：vi   AESServer.conf
 
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/40424a0123db4c93ba5fe6d23e905166.png)
+
 （3）、
 进入AESServer.conf文件，添加这一行按i（英文），输
 
@@ -39,6 +52,7 @@ root同一级别的etc目录）
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/18a337ef5ba34dbf8c583f9393078b3d.png)
 
 保存并退出AESServer.conf（在键盘上按Esc键，然后输入:wq），如下图所表示：
+
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/3f7d4679ea7340f1bfd5f67f9cefb669.png)
 
 （4）、关联动态链接库：
@@ -50,6 +64,7 @@ root同一级别的etc目录）
 在ldconfig时，若出现报错：/libclang.so.15 不是符号链接（不用管，没影响）
 
 ## 2、AES的配置
+
 第一步：
 
 进入cd /usr/local/AESServer_ReleaseV1.0.1
@@ -100,11 +115,17 @@ FSPort=4521                         //freeswtich连接的端口
 序列号申请：
 
 在如下图所示：在/usr/local/AESServer_ReleaseV1.0.1的目录下，运行./RegisterCode
+
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/a8e6bba4bd214aacb3796d690cbab838.png)
+
 运行后得到注册码，如下所示：
+
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/216a86f1c9b842be86fa93eb4650bbfd.png)
+
 将此注册码拷贝下来，进行加密：
+
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/1e6a5aa20cb94ba38bd80382d21b3024.png)
+
 第1步：将上述拷贝的注册码填入：日期加密序列号框中
 
 第2步：点击解密
