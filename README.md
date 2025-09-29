@@ -1,5 +1,7 @@
 # AES配置使用说明
 
+AES 作用：用于提供连接freeswitch的接口，我们在此取名这个服务的名字叫AES
+
 ## 1、AES的安装
 
 将AESServer_ReleaseV1.0.1.tar安装包（或通过源代码把编译好的安装包）拷贝到以下目录
