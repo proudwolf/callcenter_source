@@ -15,7 +15,27 @@ callcenter呼叫中心源代码开源社区是基于freeswitch软交换基础上
 
 https://blog.csdn.net/weixin_38921966/article/details/151991332?spm=1001.2014.3001.5502
 
-2、CTI：CTI开源部分的发布正在进行中......
+2、AES
+
+连接freeswitch的接口。
+
+包含以下内容：
+    
+  （1）、AES_installer：已经编译好的AES安装包，下载后可直接使用。
+  
+  （2）、AES_source_code：AES 源代码，可下载后自行编译，或进行二次开发。
+  
+ 3、CTI
+ 
+ 通过连接AES来控制freeswitch，从而进行呼叫中心电话控制
+ 
+ 包含以下内容：
+    
+  （1）、CTI_installer：已经编译好的AES安装包，下载后可直接使用。
+  
+  （2）、CTI_source_code：CTI 源代码，可下载后自行编译，或进行二次开发。
+
+
 
 # 技术咨询与支持
 
